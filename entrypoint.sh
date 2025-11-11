@@ -3,15 +3,27 @@
 ##echo "Setting NOFILE limit to 65536"
 ##ulimit -n 65536
 
-# Copy the custom cupsd.conf file
-if [ -f /app/cupsd.conf ]; then
+# Check if this is the first run (CUPS config volume is empty)
+CUPS_CONFIG_MARKER="/etc/cups/.printmqttify_initialized"
+IS_FIRST_RUN=false
+
+if [ ! -f "$CUPS_CONFIG_MARKER" ]; then
+  IS_FIRST_RUN=true
+  echo "First run detected - initializing CUPS configuration..."
+fi
+
+# Copy the custom cupsd.conf file only on first run
+if [ "$IS_FIRST_RUN" = true ] && [ -f /app/cupsd.conf ]; then
   echo "Copying custom cupsd.conf..."
   cp /app/cupsd.conf /etc/cups/cupsd.conf
   chmod 644 /etc/cups/cupsd.conf
   chown root:lp /etc/cups/cupsd.conf
+elif [ "$IS_FIRST_RUN" = false ] && [ -f /etc/cups/cupsd.conf ]; then
+  echo "Using existing CUPS configuration from volume..."
 else
   echo "Custom cupsd.conf not found!"
 fi
+
 
 # Create admin user if it doesn't already exist
 ADMIN_USER=${ADMIN_USER:-admin}
@@ -48,6 +60,9 @@ fi
 sleep 2
 
 cupsctl --remote-admin --remote-any --share-printers
+
+# Mark initialization as complete
+touch "$CUPS_CONFIG_MARKER"
 
 # Tail the CUPS log in the background
 echo "Tailing CUPS logs..."

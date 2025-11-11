@@ -8,7 +8,10 @@ services:
       - "8080:8080" # Map PrintMQTTify configuration page port
     devices:
       - "/dev/usb/lp0:/dev/usb/lp0"  # Map USB printer This needs to be configured to match your printers USB connection
+    volumes:
+      - ./configs/cups:/etc/cups  # Bind-mount host `configs/cups` to persist CUPS configuration on the host
     environment:
+      - TZ=America/New_York  # Timezone for timestamps and system time
       - MQTT_BROKER=192.168.0.71  # Replace with actual MQTT broker IP. If using the Mosquitto add-on in Home Assistant this is probably your Home Assistant IP
       - MQTT_USERNAME=mqtt-username 
       - MQTT_PASSWORD=password
@@ -21,3 +24,5 @@ services:
         hard: 65536
     stdin_open: true  # Equivalent to `-it` (interactive terminal)
     tty: true         # Keeps the container running interactively
+
+

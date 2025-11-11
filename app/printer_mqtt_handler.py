@@ -6,8 +6,10 @@ import threading
 import tempfile
 from datetime import datetime
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import mm
+from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase import pdfmetrics
+import re
 import json
 
 # Read broker, username, and password from environment variables
@@ -58,7 +60,10 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode())
         print(f"Parsed payload: {payload}")
         printer_name = payload.get("printer_name")
-        title = payload.get("title", "Print Job")
+        # Use provided title, or default to current date/time if not specified
+        title = payload.get("title")
+        if not title:
+            title = datetime.now().strftime('%m/%d/%Y %I:%M %p')
         message = payload.get("message", "No message provided")
 
         if not printer_name:
@@ -83,25 +88,27 @@ def generate_pdf(title, message):
     """Generate a PDF optimized for thermal receipt printers."""
     try:
         # Fixed page width; height is dynamic
-        # Page sizing and layout
         page_width = 80 * mm  # 80mm in points (thermal receipt width)
-        margin = 5 * mm  # Margins for the receipt
+        top_margin = 2 * mm
+        bottom_margin = 2 * mm
+        margin = 4 * mm
         content_width = page_width - (2 * margin)
 
-        # Fonts and sizes (tweakable)
+        # Fonts and sizes
         font_title = "Helvetica-Bold"
-        font_title_size = 12
+        font_title_size = 14
         font_body = "Helvetica"
         font_body_size = 10
         font_footer = "Helvetica-Oblique"
         font_footer_size = 8
 
-        # Split message into logical lines and wrap to content width
-        raw_lines = message.split('\n')
-        line_height = max(font_body_size + 2, 12)  # spacing between lines in points
+        checkbox_marker = "[  ]"
+        checkbox_gap = 1
 
-        # Helper: wrap a single logical line into multiple visual lines
-        def wrap_line(text):
+        raw_lines = message.split('\n')
+        line_height = max(font_body_size + 2, 12)
+
+        def wrap_to_width(text, max_width, font_name, font_size):
             if not text:
                 return [""]
             words = text.split(' ')
@@ -109,7 +116,7 @@ def generate_pdf(title, message):
             cur = words[0]
             for w in words[1:]:
                 test = cur + ' ' + w
-                if stringWidth(test, font_body, font_body_size) <= content_width:
+                if stringWidth(test, font_name, font_size) <= max_width:
                     cur = test
                 else:
                     lines_out.append(cur)
@@ -119,45 +126,106 @@ def generate_pdf(title, message):
 
         wrapped_lines = []
         for rl in raw_lines:
-            wrapped_lines.extend(wrap_line(rl))
+            m = re.match(r'^(?:-\s+)?(\[[ xX]?\])\s+(.*)$', rl)
+            if m:
+                content = m.group(2)
+                marker_text = 'checkbox'
+                marker_width = stringWidth(checkbox_marker, font_body, font_body_size) + checkbox_gap
+                chunks = wrap_to_width(content, content_width - marker_width - 2, font_body, font_body_size)
+                for i, ch in enumerate(chunks):
+                    if i == 0:
+                        wrapped_lines.append((ch, marker_width, True, marker_text))
+                    else:
+                        wrapped_lines.append((ch, marker_width, False, marker_text))
+            elif rl.startswith('- '):
+                content = rl[2:]
+                dash_width = stringWidth('- ', font_body, font_body_size)
+                chunks = wrap_to_width(content, content_width - dash_width - 2, font_body, font_body_size)
+                for i, ch in enumerate(chunks):
+                    if i == 0:
+                        wrapped_lines.append((ch, dash_width, True, 'dash'))
+                    else:
+                        wrapped_lines.append((ch, dash_width, False, 'dash'))
+            else:
+                chunks = wrap_to_width(rl, content_width - 2, font_body, font_body_size)
+                for ch in chunks:
+                    wrapped_lines.append((ch, 0, False, None))
 
-        # Calculate the required height for the content
-        calculated_height = margin + (len(wrapped_lines) + 4) * line_height  # title + divider + footer
+        # Compute title ascent early so we can reserve enough vertical space
+        # when calculating the page height (prevents footer/content overlap).
+        title_ascent = (pdfmetrics.getAscent(font_title) * font_title_size) / 1000.0
 
-        # Ensure portrait orientation (height > width)
-        page_height = max(calculated_height, page_width + 1)
+        # Calculate height conservatively: reserve room for title ascent, a
+        # divider line, the message lines, a spacer before the footer, the
+        # footer font height, and bottom margin.
+        calculated_height = (
+            top_margin
+            + title_ascent
+            + (len(wrapped_lines) + 4) * line_height
+            + font_footer_size
+            + bottom_margin
+        )
 
-        # Use a unique temporary file to avoid collisions
+        # Use a small minimum page height to avoid producing a square 80x80mm page
+        # when content is very short. 30mm is a reasonable minimum receipt height
+        # that keeps portrait orientation without large blank areas.
+        min_height = 30 * mm
+        page_height = max(calculated_height, min_height)
+
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf_path = tmp.name
         tmp.close()
 
         c = canvas.Canvas(pdf_path, pagesize=(page_width, page_height))
 
-        # Start drawing from the top of the page
-        y = page_height - margin
+        # Auto-scale title to fit
+        while True:
+            title_width = stringWidth(title, font_title, font_title_size)
+            if title_width <= content_width or font_title_size <= 8:
+                break
+            font_title_size -= 1
 
-        # Title Section: center the title within content area
         c.setFont(font_title, font_title_size)
         title_width = stringWidth(title, font_title, font_title_size)
         title_x = margin + max(0, (content_width - title_width) / 2)
+
+    # Position the title baseline so the glyphs fit within the top margin.
+        y = page_height - top_margin - title_ascent
         c.drawString(title_x, y, title)
 
         # Divider
         y -= line_height
+        c.setLineWidth(0.5)
         c.line(margin, y, page_width - margin, y)
 
-        # Message Section
+        # Message
         y -= line_height
         c.setFont(font_body, font_body_size)
-        for line in wrapped_lines:
-            c.drawString(margin, y, line)
+        for (chunk, indent_pts, draw_dash, marker_text) in wrapped_lines:
+            if indent_pts > 0 and draw_dash:
+                if marker_text == 'checkbox':
+                    c.drawString(margin, y, checkbox_marker)
+                else:
+                    c.drawString(margin, y, '-')
+                indent_x = margin + indent_pts
+                c.drawString(indent_x, y, chunk)
+            elif indent_pts > 0 and not draw_dash:
+                indent_x = margin + indent_pts
+                c.drawString(indent_x, y, chunk)
+            else:
+                c.drawString(margin, y, chunk)
             y -= line_height
 
-        # Footer Section: timestamp and attribution
-        footer_text = f"Generated by PrintMQTTify — {datetime.now().isoformat(timespec='seconds')}"
+        # Footer
+        now = datetime.now()
+        formatted_time = now.strftime('%m/%d/%Y %I:%M %p')
+        footer_text = f"Generated by PrintMQTTify — {formatted_time}"
         c.setFont(font_footer, font_footer_size)
-        c.drawString(margin, y - line_height, footer_text)
+        # Compute footer baseline: ensure it's at least `bottom_margin` above page bottom
+        footer_min_y = bottom_margin + (font_footer_size)
+        # normally footer sits one line below last content: y - line_height
+        footer_y = max(footer_min_y, y - line_height)
+        c.drawString(margin, footer_y, footer_text)
 
         c.save()
         print(f"PDF saved to {pdf_path}")
