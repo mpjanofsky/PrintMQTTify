@@ -18,7 +18,8 @@ EXPOSE 631
 ENV CUPS_CONF_DIR=/etc/cups \
     APP_DIR=/app \
     DRIVER_ARCHIVE=/tmp/sewoocupsinstall_amd64.tar.gz \
-    DRIVER_TMP_DIR=/tmp/sewoocupsinstall_amd64
+    DRIVER_TMP_DIR=/tmp/sewoocupsinstall_amd64 \
+    DRIVER_ARCHIVE=/tmp/tmx-cups-src-ThermalReceipt-3.0.0.0.tar.gz
 
 # Copy the pre-configured CUPS config and entrypoint script
 COPY configs/cupsd.conf $APP_DIR/cupsd.conf
@@ -34,6 +35,16 @@ RUN tar -zxvf $DRIVER_ARCHIVE -C /tmp && \
     chmod +x setup.sh && \
     sh setup.sh && \
     rm -rf $DRIVER_TMP_DIR $DRIVER_ARCHIVE
+
+# Copy and install the Epson TM-m30 driver
+COPY drivers/tm-m30/tmx-cups-src-ThermalReceipt-3.0.0.0.tar.gz $DRIVER_ARCHIVE
+RUN apt-get update && apt-get install -y build-essential cmake libcups2-dev gzip && \
+    tar -zxvf $DRIVER_ARCHIVE -C /tmp && \
+    cd /tmp/Thermal\ Receipt && \
+    chmod +x build.sh install.sh && \
+    ./build.sh && \
+    ./install.sh && \
+    rm -rf /tmp/Thermal\ Receipt $DRIVER_ARCHIVE
 
 # Ensure permissions are correct
 RUN chmod 644 $APP_DIR/cupsd.conf && chmod +x $APP_DIR/entrypoint.sh
