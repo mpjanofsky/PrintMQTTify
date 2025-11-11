@@ -1,6 +1,10 @@
 PrintMQTTify
 ============
 
+This forked versions contain updates to the formatting of the printed lists as well as using persistent storage for the CUPS configuration. Copilot was used extensively, proceed at your own risk.
+
+* * * * *
+
 PrintMQTTify is a Docker-based solution that bridges MQTT messages to a CUPS printer, allowing you to print messages from your MQTT broker seamlessly. This is particularly useful in smart home setups for automating printing tasks, such as printing shopping lists or event reminders directly from Home Assistant. This project provides an easy way to connect printers to your smart home system, such as Home Assistant, and send print commands using MQTT.
 
 * * * * *
