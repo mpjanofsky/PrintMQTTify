@@ -1,0 +1,96 @@
+# PrintMQTTify Named Style Presets
+#
+# These styles control the visual appearance of printouts.
+# Resolution order (last wins):
+#   built-in defaults → named style (via "style" field) → per-message "formatting" overrides
+#
+# Available fields:
+#   font_size       - Body text size in points
+#   title_size      - Title text size in points (auto-scales down if too wide)
+#   margin_top      - Top margin in mm
+#   margin_bottom   - Bottom margin in mm
+#   margin_sides    - Left/right margin in mm
+#   show_footer     - Whether to print the "Printed at ..." footer (true/false)
+#   min_page_height - Minimum page height in mm (prevents excessively short receipts)
+#   text_align      - Text alignment for plain (non-list) body items: "left" or "center"
+#   font_family     - "dejavu" (default, DejaVu Sans TTF) or "helvetica" (built-in)
+#   checkbox_style  - "box" (drawn square, default) or "bracket" ([  ] text)
+
+styles:
+  # Default: General-purpose printout with footer
+  default:
+    font_size: 9
+    title_size: 14
+    margin_top: 4
+    margin_bottom: 2
+    margin_sides: 4
+    show_footer: true
+    min_page_height: 80
+    text_align: left
+    font_family: dejavu
+    checkbox_style: box
+
+  # Compact: Smaller text, tighter margins, no footer — good for short notes
+  compact:
+    font_size: 8
+    title_size: 11
+    margin_top: 3
+    margin_bottom: 1
+    margin_sides: 3
+    show_footer: false
+    min_page_height: 60
+    text_align: left
+    font_family: dejavu
+    checkbox_style: box
+
+  # Receipt: Larger text and more padding — easy to read at a glance
+  receipt:
+    font_size: 10
+    title_size: 16
+    margin_top: 4
+    margin_bottom: 4
+    margin_sides: 6
+    show_footer: true
+    min_page_height: 100
+    text_align: left
+    font_family: dejavu
+    checkbox_style: box
+
+  # Minimal: Bare-bones, no footer, tight margins — for quick ad-hoc slips
+  minimal:
+    font_size: 9
+    title_size: 14
+    margin_top: 3
+    margin_bottom: 1
+    margin_sides: 2
+    show_footer: false
+    min_page_height: 60
+    text_align: left
+    font_family: dejavu
+    checkbox_style: box
+
+  # Agenda: Optimised for daily schedule / multi-section printouts
+  agenda:
+    font_size: 9
+    title_size: 13
+    margin_top: 4
+    margin_bottom: 2
+    margin_sides: 4
+    show_footer: false
+    min_page_height: 80
+    text_align: left
+    font_family: dejavu
+    checkbox_style: box
+
+  # Note: Centred text, generous padding — good for affirmations, short messages
+  note:
+    font_size: 12
+    title_size: 14
+    margin_top: 4
+    margin_bottom: 4
+    margin_sides: 6
+    show_footer: false
+    min_page_height: 60
+    text_align: center
+    font_family: dejavu
+    checkbox_style: box

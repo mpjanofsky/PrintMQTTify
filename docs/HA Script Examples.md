@@ -1,13 +1,128 @@
-# Shopping List Automation Scripts
+# Home Assistant Script Examples
 
-This document showcases two scripts for automating the categorization and printing of a shopping list:
-
-1. **Original Script**: A basic script that retrieves a shopping list, adds checkboxes, and sends it to a printer.
-2. **AI-Powered Script**: An enhanced script that uses OpenAI's conversational capabilities to categorize the shopping list and add checkboxes only to the items within categories.
+PrintMQTTify receives JSON payloads over MQTT. Every example below can be pasted
+directly into a Home Assistant automation or script — just update `printer_name` to
+match the name configured in your CUPS interface.
 
 ---
 
-## Original Script
+## Payload Reference
+
+```json
+{
+  "printer_name": "Epson_TM-m30",
+  "title": "Optional title (defaults to current date/time)",
+  "style": "default",
+  "plain_text": false,
+  "formatting": {
+    "font_size": 10,
+    "title_size": 14,
+    "show_footer": true,
+    "margin_top": 2,
+    "margin_bottom": 2,
+    "margin_sides": 4,
+    "min_page_height": 80,
+    "text_align": "left"
+  },
+  "sections": [
+    {
+      "heading": "Optional section heading",
+      "items": [
+        "Plain text item",
+        "- Dash bullet item",
+        "[ ] Checkbox item"
+      ]
+    }
+  ],
+  "qr_code": {
+    "content": "https://example.com",
+    "size": "medium",
+    "caption": "Optional caption below QR"
+  }
+}
+```
+
+**Key rules:**
+
+- `printer_name` is the only required field.
+- Use `sections` for structured, multi-area content. Use `message` (a plain string) for
+  simple single-block content — it's automatically converted to a single unnamed section.
+- `style` sets a named preset; `formatting` fields override individual values on top of it.
+- `plain_text: true` disables checkbox/dash parsing — every item prints as raw text.
+- `qr_code` can also be a plain string: `"qr_code": "https://example.com"`.
+
+### Named Styles
+
+| Style | Description |
+|-------|-------------|
+| `default` | General purpose, footer shown |
+| `compact` | Small font, tight margins, no footer |
+| `receipt` | Larger font, generous padding, footer shown |
+| `minimal` | Bare-bones, no footer |
+| `agenda` | Optimised for multi-section daily schedules |
+| `note` | Centred text, generous padding, no footer |
+
+---
+
+## Examples
+
+### 1. Composite Daily Print
+
+The flagship use case: a single morning slip with weather, calendar, tasks, and an
+affirmation. Sensor values are templated in by Home Assistant — no special support
+needed in PrintMQTTify.
+
+```yaml
+alias: Print Daily Agenda
+trigger:
+  - platform: time
+    at: "07:00:00"
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "title": "{{ now().strftime('%A, %B %-d') }}",
+          "style": "agenda",
+          "sections": [
+            {
+              "heading": "Good Morning",
+              "items": [
+                "Today: {{ state_attr('weather.home', 'temperature') }}°F, {{ states('weather.home') }}"
+              ]
+            },
+            {
+              "heading": "Tasks",
+              "items": [
+                {% set ns = namespace(items=[]) %}
+                {% for item in state_attr('todo.tasks', 'items') or []
+                   if item.status == 'needs_action' %}
+                  {% set ns.items = ns.items + ['"[ ] ' ~ item.summary ~ '"'] %}
+                {% endfor %}
+                {{ ns.items | join(',\n                ') }}
+              ]
+            },
+            {
+              "items": [
+                "",
+                "\"{{ states('input_text.daily_affirmation') }}\""
+              ]
+            }
+          ]
+        }
+mode: single
+```
+
+---
+
+### 2. Shopping List
+
+Print all unchecked items from a Home Assistant todo list, with optional
+AI categorization.
+
+#### Basic version
 
 ```yaml
 alias: Print Shopping List
@@ -15,41 +130,35 @@ sequence:
   - data:
       status: needs_action
     target:
-      entity_id: todo.mealie_shopping_list
-    response_variable: shopping_list_response
+      entity_id: todo.shopping_list
+    response_variable: list_response
     action: todo.get_items
 
-  - data:
-      message: "Shopping List Response: {{ shopping_list_response }}"
-      level: info
-    action: system_log.write
-
   - variables:
-      shopping_list_message: >
-        {%- set items = shopping_list_response['todo.mealie_shopping_list']['items'] -%}
+      items_json: >
+        {%- set items = list_response['todo.shopping_list']['items'] -%}
+        {%- set ns = namespace(parts=[]) -%}
         {%- for item in items -%}
-        [ ] {{ item['summary'] }}
-        {%- if not loop.last -%}
-        {{ "\n" }}
-        {%- endif -%}
+          {%- set ns.parts = ns.parts + ['"[ ] ' ~ item['summary'] ~ '"'] -%}
         {%- endfor -%}
+        {{ ns.parts | join(', ') }}
 
-  - data:
+  - action: mqtt.publish
+    data:
       topic: printer/commands
-      payload: |
-        {%- set payload = {
-          "printer_name": "SEWOO_LK-T100",
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
           "title": "Shopping List",
-          "message": shopping_list_message
-        } -%}
-        {{ payload | tojson }}
-    action: mqtt.publish
+          "style": "receipt",
+          "sections": [{ "items": [ {{ items_json }} ] }]
+        }
 mode: single
 ```
 
----
+#### AI-categorized version
 
-## AI-Powered Script
+Uses an LLM conversation agent to group items by aisle before printing.
 
 ```yaml
 alias: Print Categorized Shopping List
@@ -57,97 +166,248 @@ sequence:
   - data:
       status: needs_action
     target:
-      entity_id: todo.mealie_shopping_list
-    response_variable: shopping_list_response
+      entity_id: todo.shopping_list
+    response_variable: list_response
     action: todo.get_items
 
   - variables:
-      shopping_list_items: >
-        {%- set items = shopping_list_response['todo.mealie_shopping_list']['items'] -%}
-        {%- for item in items -%}
-        {{ item['summary'] }}
-        {%- if not loop.last -%}
-        {{ ", " }}
-        {%- endif -%}
-        {%- endfor -%}
+      item_names: >
+        {%- set items = list_response['todo.shopping_list']['items'] -%}
+        {{ items | map(attribute='summary') | join(', ') }}
 
   - service: conversation.process
     data:
       text: >
-        Categorize: {{ shopping_list_items }}
-      language: EN
+        Categorize these grocery items by store section, using short category
+        headings. Format as: Category:\n- item\n- item\n\nNext Category:\n...
+        Items: {{ item_names }}
       agent_id: conversation.chatgpt
-      conversation_id: my_conversation_1
     response_variable: categorized_response
 
-  - variables:
-      categorized_message: >
-        {%- set categorized_text = categorized_response.response.speech.plain.speech -%}
-        {%- set lines = categorized_text.split('\n') -%}
-        {%- for line in lines if line.strip() -%}
-          {%- if line.startswith('-') and ':' not in line -%}
-            [ ] {{ line }}
-          {%- else -%}
-            {{ line }}
-          {%- endif -%}
-        {%- if not loop.last -%}
-        {{ "\n" }}
-        {%- endif -%}
-        {%- endfor -%}
-
-  - data:
-      message: "Categorized Shopping List with Checkboxes:\n{{ categorized_message }}"
-      level: info
-    action: system_log.write
-
-  - data:
+  - action: mqtt.publish
+    data:
       topic: printer/commands
-      payload: |
-        {%- set payload = {
-          "printer_name": "SEWOO_LK-T100",
-          "title": "Categorized Shopping List",
-          "message": categorized_message
-        } -%}
-        {{ payload | tojson }}
-    action: mqtt.publish
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "title": "Shopping List",
+          "style": "receipt",
+          "message": "{{ categorized_response.response.speech.plain.speech | replace('\n','\\n') | replace('"','\\"') }}"
+        }
 mode: single
 ```
 
 ---
 
-## Example Outputs
+### 3. WiFi Guest Slip
 
-### Original Script Output
-```plaintext
-[ ] Milk
-[ ] Bread
-[ ] Apples
-[ ] Sausages
+Print a welcome slip with the WiFi password encoded as a QR code. Trigger from a
+button on your dashboard or via a door sensor automation.
+
+```yaml
+alias: Print WiFi Guest Slip
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "title": "Welcome!",
+          "style": "receipt",
+          "sections": [
+            { "items": ["Join our WiFi:"] }
+          ],
+          "qr_code": {
+            "content": "WIFI:S:YourNetworkName;T:WPA;P:YourPassword;;",
+            "size": "large",
+            "caption": "Scan to connect"
+          }
+        }
 ```
 
-### AI-Powered Script Output
-```plaintext
-Dairy:
-[ ] Milk
-Bakery:
-[ ] Bread
-Fruits:
-[ ] Apples
-Meat:
-[ ] Sausages
+> **WiFi QR format:** `WIFI:S:<SSID>;T:<WPA|WEP|nopass>;P:<password>;;`
+
+---
+
+### 4. Ad-hoc Note
+
+A quick one-off plain-text message. Wire this to a dashboard button, a voice command,
+or any other trigger.
+
+```yaml
+alias: Print Quick Note
+fields:
+  message:
+    description: The message to print
+    example: "Don't forget to take out the trash!"
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "message": "{{ message }}",
+          "style": "minimal",
+          "plain_text": true
+        }
 ```
 
 ---
 
-## Features Comparison
+### 5. Gratitude / Daily Affirmation
 
-| Feature                        | Original Script | AI-Powered Script |
-|--------------------------------|-----------------|-------------------|
-| Retrieve shopping list         | ✅              | ✅                |
-| Add checkboxes to items        | ✅              | ✅                |
-| Categorize items dynamically   | ❌              | ✅                |
-| Add checkboxes only to items   | ❌              | ✅                |
+Print a centred inspirational note. Pair with an `input_text` helper in HA to rotate
+quotes, or use a fixed message.
+
+```yaml
+alias: Print Morning Affirmation
+trigger:
+  - platform: time
+    at: "07:05:00"
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "style": "note",
+          "sections": [
+            {
+              "items": [
+                "{{ now().strftime('%A, %B %-d') }}",
+                "",
+                "\"{{ states('input_text.daily_affirmation') }}\""
+              ]
+            }
+          ]
+        }
+```
 
 ---
 
-This enhanced AI-powered script showcases the integration of OpenAI to provide smarter categorization, improving the usability and clarity of the printed shopping list.
+### 6. Food Label / Meal Prep Tag
+
+Print a small label with the date made and use-by date. Trigger from a dashboard
+button when packing food containers.
+
+```yaml
+alias: Print Food Label
+fields:
+  item_name:
+    description: What was made
+    example: "Chicken soup"
+  use_by_days:
+    description: How many days until it expires
+    example: 4
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "style": "compact",
+          "sections": [
+            {
+              "items": [
+                "{{ item_name }}",
+                "Made:    {{ now().strftime('%m/%d/%Y') }}",
+                "Use by:  {{ (now() + timedelta(days=use_by_days | int)).strftime('%m/%d/%Y') }}"
+              ]
+            }
+          ]
+        }
+```
+
+---
+
+### 7. Game Night Scoreboard
+
+Print scores on demand during game night. Store each player's score in an
+`input_number` helper and trigger from a dashboard button.
+
+```yaml
+alias: Print Scoreboard
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload_template: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "title": "Scoreboard",
+          "style": "receipt",
+          "sections": [
+            {
+              "heading": "{{ now().strftime('%I:%M %p') }}",
+              "items": [
+                "Alice:   {{ states('input_number.score_alice') | int }} pts",
+                "Bob:     {{ states('input_number.score_bob') | int }} pts",
+                "Charlie: {{ states('input_number.score_charlie') | int }} pts"
+              ]
+            }
+          ]
+        }
+```
+
+---
+
+### 8. Leaving-Home Checklist
+
+Triggered when everyone leaves the house (e.g., all device trackers go `not_home`).
+Prints a quick checklist at the door.
+
+```yaml
+alias: Print Leaving-Home Checklist
+trigger:
+  - platform: state
+    entity_id: group.all_people
+    to: not_home
+action:
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload: >
+        {
+          "printer_name": "Epson_TM-m30",
+          "title": "Before You Leave",
+          "style": "minimal",
+          "sections": [
+            {
+              "items": [
+                "[ ] Keys",
+                "[ ] Wallet / phone",
+                "[ ] Charger",
+                "[ ] Dog walked?",
+                "[ ] Stove off?"
+              ]
+            }
+          ]
+        }
+```
+
+---
+
+## Tips
+
+**Sensor values anywhere** — Any HA entity state or attribute can appear inside a
+section item via `payload_template`:
+```
+"Today: {{ states('sensor.living_room_temperature') }}°F"
+```
+
+**Blank lines** — An empty string `""` in an items array inserts a blank line.
+
+**Combining style + override** — Use a named style as a base and tweak one value:
+```json
+"style": "agenda",
+"formatting": { "font_size": 10, "show_footer": true }
+```
+
+**QR code shorthand** — For a URL-only QR, pass a plain string:
+```json
+"qr_code": "https://ha.example.com/lovelace/main"
+```

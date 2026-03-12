@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     libcupsimage2 \
     avahi-daemon \
+    fonts-dejavu \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Expose the CUPS web interface
@@ -50,18 +51,14 @@ RUN apt-get update && apt-get install -y build-essential cmake libcups2-dev gzip
 RUN chmod 644 $APP_DIR/cupsd.conf && chmod +x $APP_DIR/entrypoint.sh
 
 # Install Python dependencies
-RUN pip3 install paho-mqtt
-
-# Install Flask
-RUN pip3 install flask
-
-# Install ReportLab for advanced PDF generation
-RUN pip3 install reportlab
+RUN pip3 install paho-mqtt flask reportlab pyyaml "qrcode[pil]" Pillow
 
 # Copy the MQTT handler script
 COPY app/printer_mqtt_handler.py $APP_DIR/printer_mqtt_handler.py
 # Copy the web control panel script
 COPY app/web_control_panel.py $APP_DIR/web_control_panel.py
+# Copy named style presets
+COPY configs/styles.yaml $APP_DIR/configs/styles.yaml
 WORKDIR $APP_DIR
 
 # Use entrypoint script for runtime configuration and startup

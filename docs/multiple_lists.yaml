@@ -1,0 +1,59 @@
+alias: Print Due Todos
+mode: single
+sequence:
+  - action: todo.get_items
+    target:
+      entity_id: "{{ states.todo | map(attribute='entity_id') | list }}"
+    response_variable: todo_response
+    data:
+      status: needs_action
+  - variables:
+      today_ts: "{{ today_at('00:00').timestamp() }}"
+      todo_message: |
+        {%- set ns = namespace(text='') -%}
+        {%- for entity_id in todo_response -%}
+          {%- set data = todo_response[entity_id] -%}
+          {%- set section = namespace(text='') -%}
+
+          {%- for item in data['items'] -%}
+            {%- if item.due is defined and item.due -%}
+
+              {# Normalize due date to timestamp #}
+              {%- if item.due is string -%}
+                {%- set due_ts = strptime(item.due[:10], '%Y-%m-%d').timestamp() -%}
+              {%- else -%}
+                {%- set due_ts = item.due.timestamp() -%}
+              {%- endif -%}
+
+              {%- if due_ts <= today_ts -%}
+                {%- set section.text = section.text ~
+                    '  [ ] ' ~ item.summary ~ ' (due: ' ~ item.due ~ ')' ~ '\n' -%}
+              {%- endif -%}
+
+            {%- endif -%}
+          {%- endfor -%}
+
+          {%- if section.text != '' -%}
+            {%- set list_name = entity_id.split('.')[-1]
+                 | replace('_',' ')
+                 | title -%}
+            {%- set ns.text = ns.text ~ list_name ~ '\n' ~ section.text ~ '\n' -%}
+          {%- endif -%}
+
+        {%- endfor -%}
+        {{ ns.text if ns.text != '' else 'No tasks due today 🎉' }}
+  - action: system_log.write
+    data:
+      level: info
+      message: |-
+        Due Todo Printout:
+        {{ todo_message }}
+  - action: mqtt.publish
+    data:
+      topic: printer/commands
+      payload: |
+        {
+          "printer_name": "ReceiptPrinter",
+          "title": "Due Tasks",
+          "message": {{ todo_message | tojson }}
+        }
