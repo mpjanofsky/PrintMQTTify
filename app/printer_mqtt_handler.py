@@ -224,46 +224,54 @@ def _wrap_to_width(text, max_width, font_name, font_size):
 
 
 def _process_item(text, content_width, font_body, font_size,
-                  checkbox_marker, checkbox_marker_width, plain_text):
+                  checkbox_marker, checkbox_marker_width, plain_text,
+                  font_italic=None):
     """Parse one item string into render tuples.
 
-    Each tuple is (chunk, indent_pts, draw_marker, marker_type, is_first_line) where:
+    Each tuple is (chunk, indent_pts, draw_marker, marker_type, is_first_line, font_override) where:
       chunk              - text to draw
       indent_pts         - left indent in points (0 = no indent)
       draw_marker        - whether to draw the bullet/checkbox on this line
       marker_type        - 'checkbox', 'dash', or None
       is_first_line      - True only for the first render line of each original item
                            (used to insert inter-item spacing in the render loop)
+      font_override      - font name to use instead of font_body, or None for normal
     """
     if not text:
-        return [("", 0, False, None, True)]
+        return [("", 0, False, None, True, None)]
 
     # Right-side safety buffer (points) — prevents text reaching the paper edge.
     # Thermal printers have a mechanical margin inside the 80 mm paper width;
     # 6 pt (~2 mm) keeps text clear of the physical print boundary.
     _RIGHT_BUFFER = 6
 
-    # Multi-line items: split on \n, render main line normally, sub-lines with
-    # a fixed point-based indent so they align correctly in proportional fonts.
+    # Multi-line items: split on first \n only; measure the actual separator in
+    # the main line so every event's location aligns under that event's name,
+    # regardless of whether the time is "9:00 AM", "12:30 PM", or "All Day".
     if '\n' in text:
-        parts = text.split('\n')
+        main, sub = text.split('\n', 1)
+        separator = '  -  '
+        sep_idx = main.find(separator)
+        if sep_idx != -1:
+            prefix = main[:sep_idx + len(separator)]
+            sub_indent = stringWidth(prefix, font_body, font_size)
+        else:
+            cb_match = re.match(r'^(\[[ xX]?\]\s+)', main)
+            if cb_match:
+                sub_indent = stringWidth(cb_match.group(1), font_body, font_size)
+            else:
+                sub_indent = 0
         main_tuples = _process_item(
-            parts[0], content_width, font_body, font_size,
-            checkbox_marker, checkbox_marker_width, plain_text,
+            main, content_width, font_body, font_size,
+            checkbox_marker, checkbox_marker_width, plain_text, font_italic,
         )
-        # Measure the width of a representative time prefix to align the sub-line
-        # "10:00 AM  -  " covers the widest common case
-        sub_indent = stringWidth("10:00 AM  -  ", font_body, font_size)
-        sub_tuples = []
-        for sub in parts[1:]:
-            sub_chunks = _wrap_to_width(
-                sub.strip(),
-                content_width - sub_indent - _RIGHT_BUFFER,
-                font_body, font_size,
-            )
-            sub_tuples.extend(
-                [(ch, sub_indent, False, None, False) for ch in sub_chunks]
-            )
+        sub_text = '\u21b3 ' + sub.strip()
+        sub_chunks = _wrap_to_width(
+            sub_text,
+            content_width - sub_indent - _RIGHT_BUFFER,
+            font_body, font_size,
+        )
+        sub_tuples = [(ch, sub_indent, False, None, False, font_italic) for ch in sub_chunks]
         return main_tuples + sub_tuples
 
     # Leading-space indentation — detect BEFORE plain_text branch so it applies
@@ -277,11 +285,11 @@ def _process_item(text, content_width, font_body, font_size,
             content_width - space_width - _RIGHT_BUFFER,
             font_body, font_size,
         )
-        return [(ch, space_width, False, None, i == 0) for i, ch in enumerate(chunks)]
+        return [(ch, space_width, False, None, i == 0, None) for i, ch in enumerate(chunks)]
 
     if plain_text:
         chunks = _wrap_to_width(text, content_width - _RIGHT_BUFFER, font_body, font_size)
-        return [(ch, 0, False, None, i == 0) for i, ch in enumerate(chunks)]
+        return [(ch, 0, False, None, i == 0, None) for i, ch in enumerate(chunks)]
 
     m = re.match(r'^(?:-\s+)?(\[[ xX]?\])\s+(.*)$', text)
     if m:
@@ -291,7 +299,7 @@ def _process_item(text, content_width, font_body, font_size,
             content_width - checkbox_marker_width - _RIGHT_BUFFER,
             font_body, font_size,
         )
-        return [(ch, checkbox_marker_width, i == 0, 'checkbox', i == 0) for i, ch in enumerate(chunks)]
+        return [(ch, checkbox_marker_width, i == 0, 'checkbox', i == 0, None) for i, ch in enumerate(chunks)]
 
     if text.startswith("- "):
         content = text[2:]
@@ -301,10 +309,10 @@ def _process_item(text, content_width, font_body, font_size,
             content_width - dash_width - _RIGHT_BUFFER,
             font_body, font_size,
         )
-        return [(ch, dash_width, i == 0, 'dash', i == 0) for i, ch in enumerate(chunks)]
+        return [(ch, dash_width, i == 0, 'dash', i == 0, None) for i, ch in enumerate(chunks)]
 
     chunks = _wrap_to_width(text, content_width - _RIGHT_BUFFER, font_body, font_size)
-    return [(ch, 0, False, None, i == 0) for i, ch in enumerate(chunks)]
+    return [(ch, 0, False, None, i == 0, None) for i, ch in enumerate(chunks)]
 
 
 def _render_logo_block(c, logo, margin_sides, y, content_width):
@@ -471,6 +479,7 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
                 render_lines.extend(_process_item(
                     item, content_width, font_body, font_body_size,
                     checkbox_marker, checkbox_marker_width, plain_text,
+                    font_footer,
                 ))
             rendered_sections.append({"heading": heading, "render_lines": render_lines})
 
@@ -580,7 +589,7 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
                 c.setFont(font_body, font_body_size)
 
             is_first_in_section = True
-            for (chunk, indent_pts, draw_marker, marker_type, is_first_line) in sec["render_lines"]:
+            for (chunk, indent_pts, draw_marker, marker_type, is_first_line, font_override) in sec["render_lines"]:
                 # Add a gap between distinct items (not between wrapped continuation lines).
                 if is_first_line and not is_first_in_section:
                     y -= line_height * 0.5
@@ -606,7 +615,10 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
                 elif text_align == "center":
                     text_w = stringWidth(chunk, font_body, font_body_size)
                     x = margin_sides + max(0, (content_width - text_w) / 2)
-                _draw_text_run(c, x, y, chunk, font_body, font_body_size)
+                draw_font = font_override if font_override else font_body
+                _draw_text_run(c, x, y, chunk, draw_font, font_body_size)
+                if font_override:
+                    c.setFont(font_body, font_body_size)
                 y -= line_height
 
             y -= int(line_height / 2)  # gap between sections
