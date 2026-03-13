@@ -243,6 +243,27 @@ def _process_item(text, content_width, font_body, font_size,
     # 6 pt (~2 mm) keeps text clear of the physical print boundary.
     _RIGHT_BUFFER = 6
 
+    # Multi-line items: split on \n, render main line normally, sub-lines with
+    # a fixed point-based indent so they align correctly in proportional fonts.
+    if '\n' in text:
+        parts = text.split('\n')
+        main_tuples = _process_item(
+            parts[0], content_width, font_body, font_size,
+            checkbox_marker, checkbox_marker_width, plain_text,
+        )
+        sub_indent = font_size * 2.8
+        sub_tuples = []
+        for sub in parts[1:]:
+            sub_chunks = _wrap_to_width(
+                sub.strip(),
+                content_width - sub_indent - _RIGHT_BUFFER,
+                font_body, font_size,
+            )
+            sub_tuples.extend(
+                [(ch, sub_indent, False, None, False) for ch in sub_chunks]
+            )
+        return main_tuples + sub_tuples
+
     # Leading-space indentation — detect BEFORE plain_text branch so it applies
     # in both normal and plain-text modes.
     leading = len(text) - len(text.lstrip(' '))
