@@ -251,7 +251,9 @@ def _process_item(text, content_width, font_body, font_size,
             parts[0], content_width, font_body, font_size,
             checkbox_marker, checkbox_marker_width, plain_text,
         )
-        sub_indent = font_size * 2.8
+        # Measure the width of a representative time prefix to align the sub-line
+        # "10:00 AM  -  " covers the widest common case
+        sub_indent = stringWidth("10:00 AM  -  ", font_body, font_size)
         sub_tuples = []
         for sub in parts[1:]:
             sub_chunks = _wrap_to_width(
