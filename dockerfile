@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libcupsimage2 \
     avahi-daemon \
     fonts-dejavu \
+    fonts-noto-color-emoji \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Expose the CUPS web interface

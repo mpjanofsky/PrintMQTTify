@@ -155,6 +155,7 @@ Send JSON to the MQTT topic configured in `MQTT_TOPIC` (default: `printer/comman
 {
   "printer_name": "Epson_TM-m30",
   "title": "Optional title (defaults to current date/time)",
+  "subtitle": "Optional subtitle shown flush under the title divider",
   "style": "default",
   "plain_text": false,
   "formatting": {
@@ -163,7 +164,7 @@ Send JSON to the MQTT topic configured in `MQTT_TOPIC` (default: `printer/comman
     "show_footer": true,
     "margin_top": 2,
     "margin_bottom": 2,
-    "margin_sides": 4,
+    "margin_sides": 2,
     "min_page_height": 80,
     "text_align": "left"
   },
@@ -189,6 +190,7 @@ Send JSON to the MQTT topic configured in `MQTT_TOPIC` (default: `printer/comman
 |-------|----------|-------------|
 | `printer_name` | **Yes** | CUPS printer name (case-sensitive) |
 | `title` | No | Title printed at top; defaults to current date/time |
+| `subtitle` | No | Secondary line rendered centred directly below the title divider (e.g. `"Friday, March 13, 2026"`) |
 | `style` | No | Named style preset (see below); defaults to `default` |
 | `plain_text` | No | `true` to skip checkbox/dash parsing; defaults to `false` |
 | `formatting` | No | Per-message overrides for any style field |

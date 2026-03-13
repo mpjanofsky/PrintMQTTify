@@ -12,6 +12,7 @@ match the name configured in your CUPS interface.
 {
   "printer_name": "Epson_TM-m30",
   "title": "Optional title (defaults to current date/time)",
+  "subtitle": "Optional subtitle shown flush under the title divider",
   "style": "default",
   "plain_text": false,
   "formatting": {
@@ -20,7 +21,7 @@ match the name configured in your CUPS interface.
     "show_footer": true,
     "margin_top": 2,
     "margin_bottom": 2,
-    "margin_sides": 4,
+    "margin_sides": 2,
     "min_page_height": 80,
     "text_align": "left"
   },
@@ -50,6 +51,8 @@ match the name configured in your CUPS interface.
 - `style` sets a named preset; `formatting` fields override individual values on top of it.
 - `plain_text: true` disables checkbox/dash parsing — every item prints as raw text.
 - `qr_code` can also be a plain string: `"qr_code": "https://example.com"`.
+- `subtitle` renders centred in a slightly smaller font immediately below the title divider,
+  with a small spacer before the first section. Useful for dates, sub-headings, or short context lines.
 
 ### Named Styles
 
@@ -85,6 +88,7 @@ action:
         {
           "printer_name": "Epson_TM-m30",
           "title": "{{ now().strftime('%A, %B %-d') }}",
+          "subtitle": "{{ now().strftime('%B %-d, %Y') }}",
           "style": "agenda",
           "sections": [
             {
@@ -411,3 +415,10 @@ section item via `payload_template`:
 ```json
 "qr_code": "https://ha.example.com/lovelace/main"
 ```
+
+**Subtitle** — Add a secondary line flush under the title divider. Great for dates or context:
+```json
+"title": "Morning Briefing",
+"subtitle": "{{ now().strftime('%A, %B %-d, %Y') }}"
+```
+The subtitle renders centred in a slightly smaller font (`title_size - 2 pt`) with a small spacer before the first section begins.

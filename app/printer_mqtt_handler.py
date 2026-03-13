@@ -28,11 +28,12 @@ _DEJAVU_FONTS = {
     "DejaVuSans-Oblique":     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
     "DejaVuSans-BoldOblique": "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
 }
+_NOTO_EMOJI_PATH = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
 _FONTS_AVAILABLE = set()
 
 
 def _register_fonts():
-    """Register DejaVu Sans TTF fonts; gracefully skips any that are missing."""
+    """Register DejaVu Sans TTF fonts and NotoEmoji; gracefully skips any that are missing."""
     for name, path in _DEJAVU_FONTS.items():
         try:
             if not os.path.exists(path):
@@ -45,9 +46,54 @@ def _register_fonts():
         print(f"Registered fonts: {', '.join(sorted(_FONTS_AVAILABLE))}")
     else:
         print("Warning: no DejaVu fonts registered; falling back to built-in Helvetica.")
+    try:
+        if not os.path.exists(_NOTO_EMOJI_PATH):
+            raise FileNotFoundError(f"not found: {_NOTO_EMOJI_PATH}")
+        pdfmetrics.registerFont(TTFont("NotoEmoji", _NOTO_EMOJI_PATH))
+        _FONTS_AVAILABLE.add("NotoEmoji")
+        print("Registered NotoEmoji font.")
+    except Exception as e:
+        print(f"Warning: could not register NotoEmoji (emoji will use body font): {e}")
 
 
 _register_fonts()
+
+
+def _is_emoji(ch):
+    """Return True if *ch* is an emoji or symbol codepoint."""
+    cp = ord(ch)
+    return (
+        0x2600 <= cp <= 0x27BF   # Misc Symbols and Dingbats
+        or cp >= 0x1F300          # Emoji blocks (emoticons, symbols, transport, etc.)
+    )
+
+
+def _draw_text_run(c, x, y, text, font_main, font_size):
+    """Draw *text* on canvas *c*, switching to NotoEmoji for emoji codepoints.
+
+    Non-emoji characters use *font_main*. Restores *font_main* on the canvas
+    before returning so subsequent draw calls are unaffected.
+    Falls back to *font_main* for all characters if NotoEmoji is unavailable.
+    """
+    emoji_available = "NotoEmoji" in _FONTS_AVAILABLE
+    cur_font = None
+    cur_chunk = ""
+    for ch in text:
+        want = "NotoEmoji" if (emoji_available and _is_emoji(ch)) else font_main
+        if want != cur_font:
+            if cur_chunk:
+                c.setFont(cur_font, font_size)
+                c.drawString(x, y, cur_chunk)
+                x += stringWidth(cur_chunk, cur_font, font_size)
+            cur_chunk = ch
+            cur_font = want
+        else:
+            cur_chunk += ch
+    if cur_chunk:
+        c.setFont(cur_font, font_size)
+        c.drawString(x, y, cur_chunk)
+    # Restore the expected font for subsequent canvas operations.
+    c.setFont(font_main, font_size)
 
 
 def _resolve_fonts(font_family):
@@ -72,7 +118,7 @@ BUILTIN_DEFAULTS = {
     "title_size": 14,           # title text in points (auto-scales down if needed)
     "margin_top": 2,            # mm
     "margin_bottom": 2,         # mm
-    "margin_sides": 4,          # mm
+    "margin_sides": 2,          # mm
     "show_footer": True,
     "min_page_height": 80,      # mm (prevents excessively short receipts)
     "text_align": "left",       # "left" or "center" for plain body items
@@ -194,8 +240,8 @@ def _process_item(text, content_width, font_body, font_size,
 
     # Right-side safety buffer (points) — prevents text reaching the paper edge.
     # Thermal printers have a mechanical margin inside the 80 mm paper width;
-    # 20 pt (~7 mm) keeps text well clear of the physical print boundary.
-    _RIGHT_BUFFER = 20
+    # 6 pt (~2 mm) keeps text clear of the physical print boundary.
+    _RIGHT_BUFFER = 6
 
     if plain_text:
         chunks = _wrap_to_width(text, content_width - _RIGHT_BUFFER, font_body, font_size)
@@ -329,7 +375,7 @@ def _render_qr_block(c, qr_code, margin, y, content_width, line_height):
 
 # ─── Core PDF generation ──────────────────────────────────────────────────────
 
-def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None):
+def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None, subtitle=None):
     """Generate a receipt-width PDF and return its temp file path."""
     try:
         page_width    = 80 * mm
@@ -419,11 +465,18 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
                 total_lines += (item_count - 1) * 0.5   # inter-item gaps
             total_lines += 1       # inter-section gap
 
+        subtitle_height_pts = 0
+        if subtitle:
+            subtitle_size_est = max(fmt["title_size"] - 3, 8)
+            sub_ascent_est = (pdfmetrics.getAscent(font_body) * subtitle_size_est) / 1000.0
+            subtitle_height_pts = sub_ascent_est + 2 + line_height * 0.3
+
         title_ascent = (pdfmetrics.getAscent(font_title) * font_title_size) / 1000.0
         calculated_height = (
             margin_top
             + logo_height_pts
             + title_ascent
+            + subtitle_height_pts
             + (total_lines + 4.5) * line_height   # 4.5 covers title area + extra divider gap
             + (font_footer_size if fmt["show_footer"] else 0)
             + qr_height
@@ -458,21 +511,32 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
         title_x     = margin_sides + max(0, (content_width - title_width) / 2)
 
         y -= title_ascent_actual
-        c.drawString(title_x, y, title)
+        _draw_text_run(c, title_x, y, title, font_title, font_title_size)
 
         # ── Divider below title ────────────────────────────────────────────────
         y -= line_height
         c.setLineWidth(0.5)
         c.line(margin_sides, y, page_width - margin_sides, y)
-        y -= line_height
-        y -= line_height * 0.5     # extra breathing room after divider
+
+        if subtitle:
+            subtitle_size = max(font_title_size - 3, 8)
+            subtitle_ascent = (pdfmetrics.getAscent(font_body) * subtitle_size) / 1000.0
+            c.setFont(font_body, subtitle_size)
+            subtitle_width = stringWidth(subtitle, font_body, subtitle_size)
+            subtitle_x = margin_sides + max(0, (content_width - subtitle_width) / 2)
+            y -= subtitle_ascent + 2   # tight clearance below divider line
+            _draw_text_run(c, subtitle_x, y, subtitle, font_body, subtitle_size)
+            y -= line_height * 0.3     # small spacer before first section
+        else:
+            y -= line_height
+            y -= line_height * 0.5     # extra breathing room after divider
 
         # ── Render sections ────────────────────────────────────────────────────
         text_align = fmt.get("text_align", "left")
         for sec in rendered_sections:
             if sec["heading"]:
                 c.setFont(font_heading, font_body_size)
-                c.drawString(margin_sides, y, sec["heading"].upper())
+                _draw_text_run(c, margin_sides, y, sec["heading"], font_heading, font_body_size)
                 y -= 2
                 c.setLineWidth(0.3)
                 c.line(margin_sides, y, page_width - margin_sides, y)
@@ -506,7 +570,7 @@ def generate_pdf(title, sections, fmt, plain_text=False, qr_code=None, logo=None
                 elif text_align == "center":
                     text_w = stringWidth(chunk, font_body, font_body_size)
                     x = margin_sides + max(0, (content_width - text_w) / 2)
-                c.drawString(x, y, chunk)
+                _draw_text_run(c, x, y, chunk, font_body, font_body_size)
                 y -= line_height
 
             y -= int(line_height / 2)  # gap between sections
@@ -594,13 +658,14 @@ def on_message(client, userdata, msg):
             raise ValueError("Missing 'printer_name' in payload")
 
         title      = data.get("title") or datetime.now().strftime('%m/%d/%Y %I:%M %p')
+        subtitle   = data.get("subtitle")
         fmt        = resolve_formatting(data)
         sections   = normalize_sections(data)
         plain_text = data.get("plain_text", False)
         qr_code    = data.get("qr_code")
         logo       = data.get("logo")
 
-        pdf_path = generate_pdf(title, sections, fmt, plain_text, qr_code, logo)
+        pdf_path = generate_pdf(title, sections, fmt, plain_text, qr_code, logo, subtitle)
         if pdf_path:
             send_to_printer(printer_name, pdf_path)
         else:
