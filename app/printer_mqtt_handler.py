@@ -243,6 +243,19 @@ def _process_item(text, content_width, font_body, font_size,
     # 6 pt (~2 mm) keeps text clear of the physical print boundary.
     _RIGHT_BUFFER = 6
 
+    # Leading-space indentation — detect BEFORE plain_text branch so it applies
+    # in both normal and plain-text modes.
+    leading = len(text) - len(text.lstrip(' '))
+    if leading > 0:
+        space_width = stringWidth(text[:leading], font_body, font_size)
+        content = text[leading:]
+        chunks = _wrap_to_width(
+            content,
+            content_width - space_width - _RIGHT_BUFFER,
+            font_body, font_size,
+        )
+        return [(ch, space_width, False, None, i == 0) for i, ch in enumerate(chunks)]
+
     if plain_text:
         chunks = _wrap_to_width(text, content_width - _RIGHT_BUFFER, font_body, font_size)
         return [(ch, 0, False, None, i == 0) for i, ch in enumerate(chunks)]
