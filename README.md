@@ -223,6 +223,29 @@ Within each section's `items` array:
 | `- ` | Dash bullet |
 | *(plain text)* | Regular body text |
 | `""` (empty) | Blank line |
+| Leading spaces | Indented text (indent proportional to space count) |
+
+#### Multi-line items
+
+Embed a `\n` in any item string to attach a sub-line rendered below the main line with a `↳` prefix. The sub-line is automatically indented to align under the main text based on the item type:
+
+- **Separator syntax** — use `  -  ` (two spaces, dash, two spaces) to split a main label from a detail (e.g. an event time). The sub-line aligns under the text that follows the separator:
+
+  ```json
+  "items": [
+    "Team Standup  -  9:00 AM\nConference Room B"
+  ]
+  ```
+
+- **Checkbox items** — the sub-line aligns under the checkbox label text:
+
+  ```json
+  "items": [
+    "[ ] Pick up groceries\nMilk, eggs, bread"
+  ]
+  ```
+
+- **Plain items** — sub-line starts at column 0 (no indent).
 
 ### QR Code
 
